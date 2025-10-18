@@ -12,6 +12,7 @@ import (
 	"strconv"
 )
 
+// RPCClient defines methods for making JSON-RPC calls.
 type RPCClient interface {
 	Call(ctx context.Context, method string, params ...any) (*RPCResponse, error)
 	CallRaw(ctx context.Context, request *RPCRequest) (*RPCResponse, error)
@@ -20,47 +21,57 @@ type RPCClient interface {
 	CallBatchRaw(ctx context.Context, requests RPCRequests) (RPCResponses, error)
 }
 
+// RPCRequest represents a JSON-RPC request.
 type RPCRequest struct {
 	Method string `json:"method"`
 	Params any    `json:"params,omitempty"`
 	ID     int    `json:"id"`
 }
 
+// NewRequest creates an RPCRequest with auto-generated ID.
 func NewRequest(method string, params ...any) *RPCRequest {
 	return &RPCRequest{Method: method, Params: Params(params...)}
 }
 
+// NewRequestWithID creates an RPCRequest with a specific ID.
 func NewRequestWithID(id int, method string, params ...any) *RPCRequest {
 	return &RPCRequest{ID: id, Method: method, Params: Params(params...)}
 }
 
+// RPCResponse represents a JSON-RPC response.
 type RPCResponse struct {
 	Result any       `json:"result,omitempty"`
 	Error  *RPCError `json:"error,omitempty"`
 	ID     int       `json:"id"`
 }
 
+// RPCError represents a JSON-RPC error.
 type RPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 	Data    any    `json:"data,omitempty"`
 }
 
+// Error implements the error interface for RPCError.
 func (e *RPCError) Error() string {
 	return strconv.Itoa(e.Code) + ": " + e.Message
 }
 
+// HTTPError represents an HTTP-level error.
 type HTTPError struct {
 	Code int
 	err  error
 }
 
+// Error implements the error interface for HTTPError.
 func (e *HTTPError) Error() string { return e.err.Error() }
 
+// HTTPClient defines the interface for making HTTP requests.
 type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
+// rpcClient implements RPCClient using HTTP transport.
 type rpcClient struct {
 	endpoint           string
 	httpClient         HTTPClient
@@ -69,6 +80,7 @@ type rpcClient struct {
 	defaultRequestID   int
 }
 
+// RPCClientOpts contains options for creating an RPC client.
 type RPCClientOpts struct {
 	HTTPClient         HTTPClient
 	CustomHeaders      map[string]string
@@ -76,9 +88,13 @@ type RPCClientOpts struct {
 	DefaultRequestID   int
 }
 
+// RPCResponses is a slice of RPC responses with helper methods.
 type RPCResponses []*RPCResponse
+
+// RPCRequests is a slice of RPC requests.
 type RPCRequests []*RPCRequest
 
+// AsMap converts responses to a map indexed by response ID.
 func (res RPCResponses) AsMap() map[int]*RPCResponse {
 	m := make(map[int]*RPCResponse, len(res))
 	for _, r := range res {
@@ -87,6 +103,7 @@ func (res RPCResponses) AsMap() map[int]*RPCResponse {
 	return m
 }
 
+// GetByID retrieves a response by its ID.
 func (res RPCResponses) GetByID(id int) *RPCResponse {
 	for _, r := range res {
 		if r.ID == id {
@@ -96,6 +113,7 @@ func (res RPCResponses) GetByID(id int) *RPCResponse {
 	return nil
 }
 
+// HasError returns true if any response contains an error.
 func (res RPCResponses) HasError() bool {
 	for _, r := range res {
 		if r.Error != nil {
@@ -105,10 +123,12 @@ func (res RPCResponses) HasError() bool {
 	return false
 }
 
+// NewClient creates an RPCClient with default options.
 func NewClient(endpoint string) RPCClient {
 	return NewClientWithOpts(endpoint, nil)
 }
 
+// NewClientWithOpts creates an RPCClient with custom options.
 func NewClientWithOpts(endpoint string, opts *RPCClientOpts) RPCClient {
 	c := &rpcClient{
 		endpoint:      endpoint,
@@ -129,7 +149,7 @@ func NewClientWithOpts(endpoint string, opts *RPCClientOpts) RPCClient {
 	return c
 }
 
-// Modified: Call now returns RPC errors as Go error.
+// Call makes an RPC call and returns RPC errors as Go errors.
 func (c *rpcClient) Call(ctx context.Context, method string, params ...any) (*RPCResponse, error) {
 	req := &RPCRequest{
 		ID:     c.defaultRequestID,
@@ -146,10 +166,12 @@ func (c *rpcClient) Call(ctx context.Context, method string, params ...any) (*RP
 	return resp, nil
 }
 
+// CallRaw makes an RPC call without modification to the request.
 func (c *rpcClient) CallRaw(ctx context.Context, req *RPCRequest) (*RPCResponse, error) {
 	return c.doCall(ctx, req)
 }
 
+// CallFor makes an RPC call and unmarshals the result into out.
 func (c *rpcClient) CallFor(ctx context.Context, out any, method string, params ...any) error {
 	resp, err := c.Call(ctx, method, params...)
 	if err != nil {
@@ -159,6 +181,7 @@ func (c *rpcClient) CallFor(ctx context.Context, out any, method string, params 
 	return resp.GetObject(out)
 }
 
+// CallBatch makes multiple RPC calls in a single batch request.
 func (c *rpcClient) CallBatch(ctx context.Context, requests RPCRequests) (RPCResponses, error) {
 	if len(requests) == 0 {
 		return nil, errors.New("empty request list")
@@ -169,6 +192,7 @@ func (c *rpcClient) CallBatch(ctx context.Context, requests RPCRequests) (RPCRes
 	return c.doBatchCall(ctx, requests)
 }
 
+// CallBatchRaw makes a batch call without modifying request IDs.
 func (c *rpcClient) CallBatchRaw(ctx context.Context, requests RPCRequests) (RPCResponses, error) {
 	if len(requests) == 0 {
 		return nil, errors.New("empty request list")
@@ -176,6 +200,7 @@ func (c *rpcClient) CallBatchRaw(ctx context.Context, requests RPCRequests) (RPC
 	return c.doBatchCall(ctx, requests)
 }
 
+// newRequest creates an HTTP request with JSON-encoded body.
 func (c *rpcClient) newRequest(ctx context.Context, req any) (*http.Request, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -197,6 +222,7 @@ func (c *rpcClient) newRequest(ctx context.Context, req any) (*http.Request, err
 	return httpReq, nil
 }
 
+// doCall sends an RPC request and decodes the response.
 func (c *rpcClient) doCall(ctx context.Context, req *RPCRequest) (*RPCResponse, error) {
 	httpReq, err := c.newRequest(ctx, req)
 	if err != nil {
@@ -224,6 +250,7 @@ func (c *rpcClient) doCall(ctx context.Context, req *RPCRequest) (*RPCResponse, 
 	return resp, nil
 }
 
+// doBatchCall sends multiple RPC requests and decodes responses.
 func (c *rpcClient) doBatchCall(ctx context.Context, reqs []*RPCRequest) ([]*RPCResponse, error) {
 	httpReq, err := c.newRequest(ctx, reqs)
 	if err != nil {
@@ -250,6 +277,7 @@ func (c *rpcClient) doBatchCall(ctx context.Context, reqs []*RPCRequest) ([]*RPC
 	return resps, nil
 }
 
+// Params normalizes parameters into a single value or slice.
 func Params(params ...any) any {
 	if len(params) == 0 {
 		return nil
@@ -272,6 +300,7 @@ func Params(params ...any) any {
 	return params
 }
 
+// GetInt extracts an integer from the response result.
 func (r *RPCResponse) GetInt() (int64, error) {
 	val, ok := r.Result.(json.Number)
 	if !ok {
@@ -280,6 +309,7 @@ func (r *RPCResponse) GetInt() (int64, error) {
 	return val.Int64()
 }
 
+// GetFloat extracts a float from the response result.
 func (r *RPCResponse) GetFloat() (float64, error) {
 	val, ok := r.Result.(json.Number)
 	if !ok {
@@ -288,6 +318,7 @@ func (r *RPCResponse) GetFloat() (float64, error) {
 	return val.Float64()
 }
 
+// GetBool extracts a boolean from the response result.
 func (r *RPCResponse) GetBool() (bool, error) {
 	val, ok := r.Result.(bool)
 	if !ok {
@@ -296,6 +327,7 @@ func (r *RPCResponse) GetBool() (bool, error) {
 	return val, nil
 }
 
+// GetString extracts a string from the response result.
 func (r *RPCResponse) GetString() (string, error) {
 	val, ok := r.Result.(string)
 	if !ok {
@@ -304,6 +336,7 @@ func (r *RPCResponse) GetString() (string, error) {
 	return val, nil
 }
 
+// GetObject unmarshals the response result into the target value.
 func (r *RPCResponse) GetObject(to any) error {
 	js, err := json.Marshal(r.Result)
 	if err != nil {
