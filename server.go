@@ -7,72 +7,94 @@ import (
 	"net/http"
 )
 
-// RPCRequest represents an incoming JSON-RPC request
 type RPCRequest struct {
-	Jsonrpc string          `json:"jsonrpc"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-	ID      interface{}     `json:"id"`
+	Method string      `json:"method"`
+	Params interface{} `json:"params"`
+	ID     int         `json:"id"`
 }
 
-// RPCResponse represents the outgoing response
 type RPCResponse struct {
-	Jsonrpc string      `json:"jsonrpc"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   interface{} `json:"error,omitempty"`
-	ID      interface{} `json:"id"`
+	Result interface{} `json:"result,omitempty"`
+	Error  *RPCError   `json:"error,omitempty"`
+	ID     int         `json:"id"`
 }
 
-// Handler for RPC calls
-func rpcHandler(w http.ResponseWriter, r *http.Request) {
-	var req RPCRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
-		return
-	}
-
-	var result interface{}
-	var errMsg interface{}
-
-	switch req.Method {
-	case "add":
-		var params []float64
-		json.Unmarshal(req.Params, &params)
-		result = params[0] + params[1]
-
-	case "getUser":
-		var params map[string]interface{}
-		json.Unmarshal(req.Params, &params)
-		id := params["userId"].(float64)
-		result = map[string]interface{}{
-			"id":   id,
-			"name": "Alice",
-			"role": "Admin",
-		}
-
-	case "greet":
-		var params map[string]interface{}
-		json.Unmarshal(req.Params, &params)
-		name := params["name"].(string)
-		result = fmt.Sprintf("Hello, %s! Welcome to the RPC System.", name)
-
-	default:
-		errMsg = fmt.Sprintf("Unknown method: %s", req.Method)
-	}
-
-	resp := RPCResponse{
-		Jsonrpc: "2.0",
-		Result:  result,
-		Error:   errMsg,
-		ID:      req.ID,
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+type RPCError struct {
+	Code    int         `json:"code"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
 }
 
 func main() {
-	http.HandleFunc("/rpc", rpcHandler)
-	fmt.Println("🚀 RPC Server running on http://localhost:8080/rpc")
+	http.HandleFunc("/rpc", handleRPC)
+	fmt.Println("🚀 Custom RPC Server running on http://localhost:8080/rpc")
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+func handleRPC(w http.ResponseWriter, r *http.Request) {
+	var req RPCRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, 400, req.ID, "invalid request", err.Error())
+		return
+	}
+
+	switch req.Method {
+	case "add":
+		// params expected as array [a, b]
+		arr, ok := req.Params.([]interface{})
+		if !ok || len(arr) < 2 {
+			writeError(w, 400, req.ID, "invalid params for add", nil)
+			return
+		}
+		a, _ := arr[0].(float64)
+		b, _ := arr[1].(float64)
+		writeResult(w, req.ID, a+b)
+
+	case "getUser":
+		// params expected as object {"userId": ...}
+		m, ok := req.Params.(map[string]interface{})
+		if !ok {
+			writeError(w, 400, req.ID, "invalid params for getUser", nil)
+			return
+		}
+		uidf, _ := m["userId"].(float64)
+		uid := int(uidf)
+		user := map[string]interface{}{
+			"ID":   uid,
+			"Name": "Alice",
+			"Role": "Admin",
+		}
+		writeResult(w, req.ID, user)
+
+	case "greet":
+		m, ok := req.Params.(map[string]interface{})
+		if !ok {
+			writeError(w, 400, req.ID, "invalid params for greet", nil)
+			return
+		}
+		name, _ := m["name"].(string)
+		writeResult(w, req.ID, fmt.Sprintf("Hello, %s! 👋", name))
+
+	default:
+		writeError(w, 404, req.ID, "unknown method", nil)
+	}
+}
+
+func writeResult(w http.ResponseWriter, id int, result interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	resp := RPCResponse{Result: result, ID: id}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func writeError(w http.ResponseWriter, code, id int, msg string, data interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	resp := RPCResponse{
+		Error: &RPCError{
+			Code:    code,
+			Message: msg,
+			Data:    data,
+		},
+		ID: id,
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
