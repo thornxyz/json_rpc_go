@@ -1,6 +1,6 @@
 # JSON-RPC Client Package
 
-A lightweight Go package for making JSON-RPC calls over HTTP. This implementation provides a simple and efficient client for communicating with JSON-RPC servers.
+A lightweight Go package for making JSON-RPC calls over HTTP. This implementation provides a simple and efficient client for communicating with JSON-RPC servers. Based on https://github.com/ybbus/jsonrpc
 
 ## Overview
 
@@ -46,8 +46,8 @@ The `rpcClient` struct handles the low-level HTTP communication:
 Clone the repository and navigate to the project directory:
 
 ```bash
-git clone <repository-url>
-cd <project-directory>
+git clone https://github.com/thornxyz/json_rpc_go.git
+cd json_rpc_go
 ```
 
 ### Running the Example
