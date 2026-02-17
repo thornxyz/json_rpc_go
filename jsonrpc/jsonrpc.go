@@ -10,6 +10,16 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"sync/atomic"
+	"time"
+)
+
+const (
+	ErrParseError       = -32700
+	ErrInvalidRequest   = -32600
+	ErrMethodNotFound   = -32601
+	ErrInvalidParams    = -32602
+	ErrInternalError    = -32603
 )
 
 // RPCClient defines methods for making JSON-RPC calls.
@@ -77,7 +87,7 @@ type rpcClient struct {
 	httpClient         HTTPClient
 	customHeaders      map[string]string
 	allowUnknownFields bool
-	defaultRequestID   int
+	requestIDCounter   int64
 }
 
 // RPCClientOpts contains options for creating an RPC client.
@@ -86,6 +96,7 @@ type RPCClientOpts struct {
 	CustomHeaders      map[string]string
 	AllowUnknownFields bool
 	DefaultRequestID   int
+	Timeout            time.Duration
 }
 
 // RPCResponses is a slice of RPC responses with helper methods.
@@ -130,9 +141,10 @@ func NewClient(endpoint string) RPCClient {
 
 // NewClientWithOpts creates an RPCClient with custom options.
 func NewClientWithOpts(endpoint string, opts *RPCClientOpts) RPCClient {
+	httpClient := &http.Client{Timeout: 30 * time.Second}
 	c := &rpcClient{
 		endpoint:      endpoint,
-		httpClient:    &http.Client{},
+		httpClient:    httpClient,
 		customHeaders: make(map[string]string),
 	}
 	if opts == nil {
@@ -145,14 +157,18 @@ func NewClientWithOpts(endpoint string, opts *RPCClientOpts) RPCClient {
 		maps.Copy(c.customHeaders, opts.CustomHeaders)
 	}
 	c.allowUnknownFields = opts.AllowUnknownFields
-	c.defaultRequestID = opts.DefaultRequestID
+	c.requestIDCounter = int64(opts.DefaultRequestID)
+	if opts.Timeout > 0 {
+		httpClient.Timeout = opts.Timeout
+	}
 	return c
 }
 
 // Call makes an RPC call and returns RPC errors as Go errors.
 func (c *rpcClient) Call(ctx context.Context, method string, params ...any) (*RPCResponse, error) {
+	id := atomic.AddInt64(&c.requestIDCounter, 1)
 	req := &RPCRequest{
-		ID:     c.defaultRequestID,
+		ID:     int(id),
 		Method: method,
 		Params: Params(params...),
 	}
@@ -186,8 +202,9 @@ func (c *rpcClient) CallBatch(ctx context.Context, requests RPCRequests) (RPCRes
 	if len(requests) == 0 {
 		return nil, errors.New("empty request list")
 	}
-	for i, req := range requests {
-		req.ID = i
+	for i := range requests {
+		id := atomic.AddInt64(&c.requestIDCounter, 1)
+		requests[i].ID = int(id)
 	}
 	return c.doBatchCall(ctx, requests)
 }
